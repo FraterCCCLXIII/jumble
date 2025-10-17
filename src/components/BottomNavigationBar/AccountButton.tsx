@@ -26,14 +26,14 @@ export default function AccountButton() {
     >
       {pubkey ? (
         profile ? (
-          <Avatar className={cn('w-7 h-7', active ? 'ring-primary ring-1' : '')}>
+          <Avatar className={cn('w-7 h-7', active ? 'ring-foreground ring-1' : '')}>
             <AvatarImage src={profile.avatar} className="object-cover object-center" />
             <AvatarFallback>
               <img src={defaultAvatar} />
             </AvatarFallback>
           </Avatar>
         ) : (
-          <Skeleton className={cn('w-7 h-7 rounded-full', active ? 'ring-primary ring-1' : '')} />
+          <Skeleton className={cn('w-7 h-7 rounded-full', active ? 'ring-foreground ring-1' : '')} />
         )
       ) : (
         <UserRound />

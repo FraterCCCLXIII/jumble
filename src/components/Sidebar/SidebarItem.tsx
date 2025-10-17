@@ -13,7 +13,7 @@ const SidebarItem = forwardRef<
     <Button
       className={cn(
         'flex shadow-none items-center transition-colors duration-500 bg-transparent w-12 h-12 xl:w-full xl:h-auto p-3 m-0 xl:py-2 xl:px-3 rounded-lg xl:justify-start gap-4 text-lg font-semibold [&_svg]:size-full xl:[&_svg]:size-4',
-        active && 'text-primary hover:text-primary bg-primary/10 hover:bg-primary/10',
+        active && 'text-foreground hover:text-foreground bg-foreground/10 hover:bg-foreground/10',
         className
       )}
       variant="ghost"

@@ -1,7 +1,6 @@
 import Sidebar from '@/components/Sidebar'
 import { cn } from '@/lib/utils'
 import NoteListPage from '@/pages/primary/NoteListPage'
-import HomePage from '@/pages/secondary/HomePage'
 import { CurrentRelaysProvider } from '@/providers/CurrentRelaysProvider'
 import { TPageRef } from '@/types'
 import {
@@ -12,11 +11,9 @@ import {
   RefObject,
   useContext,
   useEffect,
-  useRef,
   useState
 } from 'react'
 import BackgroundAudio from './components/BackgroundAudio'
-import BottomNavigationBar from './components/BottomNavigationBar'
 import CreateWalletGuideToast from './components/CreateWalletGuideToast'
 import TooManyRelaysAlertDialog from './components/TooManyRelaysAlertDialog'
 import { normalizeUrl } from './lib/url'
@@ -29,7 +26,6 @@ import SearchPage from './pages/primary/SearchPage'
 import { NotificationProvider } from './providers/NotificationProvider'
 import { useScreenSize } from './providers/ScreenSizeProvider'
 import { routes } from './routes'
-import modalManager from './services/modal-manager.service'
 
 export type TPrimaryPageName = keyof typeof PRIMARY_PAGE_MAP
 
@@ -43,13 +39,6 @@ type TSecondaryPageContext = {
   push: (url: string) => void
   pop: () => void
   currentIndex: number
-}
-
-type TStackItem = {
-  index: number
-  url: string
-  component: React.ReactElement | null
-  ref: RefObject<TPageRef> | null
 }
 
 const PRIMARY_PAGE_REF_MAP = {
@@ -92,21 +81,12 @@ export function useSecondaryPage() {
   return context
 }
 
-export function PageManager({ maxStackSize = 5 }: { maxStackSize?: number }) {
-  const [currentPrimaryPage, setCurrentPrimaryPage] = useState<TPrimaryPageName>('home')
-  const [primaryPages, setPrimaryPages] = useState<
-    { name: TPrimaryPageName; element: ReactNode; props?: any }[]
-  >([
-    {
-      name: 'home',
-      element: PRIMARY_PAGE_MAP.home
-    }
-  ])
-  const [secondaryStack, setSecondaryStack] = useState<TStackItem[]>([])
+export function PageManager() {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname)
   const { isSmallScreen } = useScreenSize()
-  const ignorePopStateRef = useRef(false)
 
   useEffect(() => {
+    // Handle URL normalization
     if (['/npub1', '/nprofile1'].some((prefix) => window.location.pathname.startsWith(prefix))) {
       window.history.replaceState(
         null,
@@ -124,218 +104,107 @@ export function PageManager({ maxStackSize = 5 }: { maxStackSize?: number }) {
         '/notes' + window.location.pathname + window.location.search + window.location.hash
       )
     }
-    window.history.pushState(null, '', window.location.href)
-    if (window.location.pathname !== '/') {
-      const url = window.location.pathname + window.location.search + window.location.hash
-      setSecondaryStack((prevStack) => {
-        if (isCurrentPage(prevStack, url)) return prevStack
 
-        const { newStack, newItem } = pushNewPageToStack(
-          prevStack,
-          url,
-          maxStackSize,
-          window.history.state?.index
-        )
-        if (newItem) {
-          window.history.replaceState({ index: newItem.index, url }, '', url)
-        }
-        return newStack
-      })
-    } else {
-      const searchParams = new URLSearchParams(window.location.search)
-      const r = searchParams.get('r')
-      if (r) {
-        const url = normalizeUrl(r)
-        if (url) {
-          navigatePrimaryPage('relay', { url })
-        }
-      }
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname)
     }
 
-    const onPopState = (e: PopStateEvent) => {
-      if (ignorePopStateRef.current) {
-        ignorePopStateRef.current = false
-        return
-      }
-
-      const closeModal = modalManager.pop()
-      if (closeModal) {
-        ignorePopStateRef.current = true
-        window.history.forward()
-        return
-      }
-
-      let state = e.state as { index: number; url: string } | null
-      setSecondaryStack((pre) => {
-        const currentItem = pre[pre.length - 1] as TStackItem | undefined
-        const currentIndex = currentItem?.index
-        if (!state) {
-          if (window.location.pathname + window.location.search + window.location.hash !== '/') {
-            // Just change the URL
-            return pre
-          } else {
-            // Back to root
-            state = { index: -1, url: '/' }
-          }
-        }
-
-        // Go forward
-        if (currentIndex === undefined || state.index > currentIndex) {
-          const { newStack } = pushNewPageToStack(pre, state.url, maxStackSize)
-          return newStack
-        }
-
-        if (state.index === currentIndex) {
-          return pre
-        }
-
-        // Go back
-        const newStack = pre.filter((item) => item.index <= state!.index)
-        const topItem = newStack[newStack.length - 1] as TStackItem | undefined
-        if (!topItem) {
-          // Create a new stack item if it's not exist (e.g. when the user refreshes the page, the stack will be empty)
-          const { component, ref } = findAndCreateComponent(state.url, state.index)
-          if (component) {
-            newStack.push({
-              index: state.index,
-              url: state.url,
-              component,
-              ref
-            })
-          }
-        } else if (!topItem.component) {
-          // Load the component if it's not cached
-          const { component, ref } = findAndCreateComponent(topItem.url, state.index)
-          if (component) {
-            topItem.component = component
-            topItem.ref = ref
-          }
-        }
-        if (newStack.length === 0) {
-          window.history.replaceState(null, '', '/')
-        }
-        return newStack
-      })
-    }
-
-    window.addEventListener('popstate', onPopState)
-
-    return () => {
-      window.removeEventListener('popstate', onPopState)
-    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   const navigatePrimaryPage = (page: TPrimaryPageName, props?: any) => {
-    const needScrollToTop = page === currentPrimaryPage
-    setPrimaryPages((prev) => {
-      const exists = prev.find((p) => p.name === page)
-      if (exists && props) {
-        exists.props = props
-        return [...prev]
-      } else if (!exists) {
-        return [...prev, { name: page, element: PRIMARY_PAGE_MAP[page], props }]
-      }
-      return prev
-    })
-    setCurrentPrimaryPage(page)
-    if (needScrollToTop) {
-      PRIMARY_PAGE_REF_MAP[page].current?.scrollToTop('smooth')
-    }
-    if (isSmallScreen) {
-      clearSecondaryPages()
+    if (page === 'relay' && props?.url) {
+      window.location.href = `/relays/${encodeURIComponent(props.url)}`
+    } else {
+      // Navigate to primary pages
+      const url = page === 'home' ? '/' : `/${page}`
+      window.history.pushState(null, '', url)
+      setCurrentPath(url)
     }
   }
 
-  const pushSecondaryPage = (url: string, index?: number) => {
-    setSecondaryStack((prevStack) => {
-      if (isCurrentPage(prevStack, url)) {
-        const currentItem = prevStack[prevStack.length - 1]
-        if (currentItem?.ref?.current) {
-          currentItem.ref.current.scrollToTop('instant')
-        }
-        return prevStack
-      }
-
-      const { newStack, newItem } = pushNewPageToStack(prevStack, url, maxStackSize, index)
-      if (newItem) {
-        window.history.pushState({ index: newItem.index, url }, '', url)
-      }
-      return newStack
-    })
+  const pushSecondaryPage = (url: string) => {
+    window.location.href = url
   }
 
   const popSecondaryPage = () => {
-    if (secondaryStack.length === 1) {
-      // back to home page
-      window.history.replaceState(null, '', '/')
-      setSecondaryStack([])
-    } else {
-      window.history.go(-1)
+    window.history.back()
+  }
+
+  // Determine current page name based on path
+  const getCurrentPageName = (): TPrimaryPageName => {
+    const path = currentPath.split('?')[0].split('#')[0]
+    
+    if (path === '/') return 'home'
+    if (path === '/explore') return 'explore'
+    if (path === '/notifications') return 'notifications'
+    if (path === '/search') return 'search'
+    if (path === '/profile') return 'profile'
+    if (path === '/me') return 'me'
+    
+    // Check for relay page with ?r= parameter
+    const searchParams = new URLSearchParams(window.location.search)
+    const r = searchParams.get('r')
+    if (r && path === '/') return 'relay'
+    
+    return 'home' // Default
+  }
+
+  // Find the current page component based on the path
+  const getCurrentPage = () => {
+    const path = currentPath.split('?')[0].split('#')[0]
+    
+    // Check if it's a primary page first
+    if (path === '/') {
+      return PRIMARY_PAGE_MAP.home
     }
-  }
+    
+    // Check for other primary pages
+    if (path === '/explore') {
+      return PRIMARY_PAGE_MAP.explore
+    }
+    if (path === '/notifications') {
+      return PRIMARY_PAGE_MAP.notifications
+    }
+    if (path === '/search') {
+      return PRIMARY_PAGE_MAP.search
+    }
+    if (path === '/profile') {
+      return PRIMARY_PAGE_MAP.profile
+    }
+    if (path === '/me') {
+      return PRIMARY_PAGE_MAP.me
+    }
+    
+    // Check for relay page with ?r= parameter
+    const searchParams = new URLSearchParams(window.location.search)
+    const r = searchParams.get('r')
+    if (r && path === '/') {
+      const url = normalizeUrl(r)
+      if (url) {
+        return <RelayPage ref={PRIMARY_PAGE_REF_MAP.relay} url={url} />
+      }
+    }
 
-  const clearSecondaryPages = () => {
-    if (secondaryStack.length === 0) return
-    window.history.go(-secondaryStack.length)
-  }
+    // Check secondary routes
+    for (const { matcher, element } of routes) {
+      const match = matcher(path)
+      if (match && element) {
+        const ref = createRef<TPageRef>()
+        return cloneElement(element, { ...match.params, ref } as any)
+      }
+    }
 
-  if (isSmallScreen) {
-    return (
-      <PrimaryPageContext.Provider
-        value={{
-          navigate: navigatePrimaryPage,
-          current: currentPrimaryPage,
-          display: secondaryStack.length === 0
-        }}
-      >
-        <SecondaryPageContext.Provider
-          value={{
-            push: pushSecondaryPage,
-            pop: popSecondaryPage,
-            currentIndex: secondaryStack.length
-              ? secondaryStack[secondaryStack.length - 1].index
-              : 0
-          }}
-        >
-          <CurrentRelaysProvider>
-            <NotificationProvider>
-              {!!secondaryStack.length &&
-                secondaryStack.map((item, index) => (
-                  <div
-                    key={item.index}
-                    style={{
-                      display: index === secondaryStack.length - 1 ? 'block' : 'none'
-                    }}
-                  >
-                    {item.component}
-                  </div>
-                ))}
-              {primaryPages.map(({ name, element, props }) => (
-                <div
-                  key={name}
-                  style={{
-                    display:
-                      secondaryStack.length === 0 && currentPrimaryPage === name ? 'block' : 'none'
-                  }}
-                >
-                  {props ? cloneElement(element as React.ReactElement, props) : element}
-                </div>
-              ))}
-              <BottomNavigationBar />
-              <TooManyRelaysAlertDialog />
-              <CreateWalletGuideToast />
-            </NotificationProvider>
-          </CurrentRelaysProvider>
-        </SecondaryPageContext.Provider>
-      </PrimaryPageContext.Provider>
-    )
+    // Default to home if no match
+    return PRIMARY_PAGE_MAP.home
   }
 
   return (
     <PrimaryPageContext.Provider
       value={{
         navigate: navigatePrimaryPage,
-        current: currentPrimaryPage,
+        current: getCurrentPageName(),
         display: true
       }}
     >
@@ -343,7 +212,7 @@ export function PageManager({ maxStackSize = 5 }: { maxStackSize?: number }) {
         value={{
           push: pushSecondaryPage,
           pop: popSecondaryPage,
-          currentIndex: secondaryStack.length ? secondaryStack[secondaryStack.length - 1].index : 0
+          currentIndex: 0
         }}
       >
         <CurrentRelaysProvider>
@@ -355,38 +224,12 @@ export function PageManager({ maxStackSize = 5 }: { maxStackSize?: number }) {
                   maxWidth: '1920px'
                 }}
               >
+                <div className="fixed left-0 top-0 h-[var(--vh)] z-10 bg-surface-background">
                 <Sidebar />
-                <div className="grid grid-cols-2 gap-2 w-full pr-2 py-2">
-                  <div className="rounded-lg shadow-lg bg-background overflow-hidden">
-                    {primaryPages.map(({ name, element, props }) => (
-                      <div
-                        key={name}
-                        className="flex flex-col h-full w-full"
-                        style={{
-                          display: currentPrimaryPage === name ? 'block' : 'none'
-                        }}
-                      >
-                        {props ? cloneElement(element as React.ReactElement, props) : element}
                       </div>
-                    ))}
-                  </div>
-                  <div className="rounded-lg shadow-lg bg-background overflow-hidden">
-                    {secondaryStack.map((item, index) => (
-                      <div
-                        key={item.index}
-                        className="flex flex-col h-full w-full"
-                        style={{ display: index === secondaryStack.length - 1 ? 'block' : 'none' }}
-                      >
-                        {item.component}
-                      </div>
-                    ))}
-                    <div
-                      key="home"
-                      className="w-full"
-                      style={{ display: secondaryStack.length === 0 ? 'block' : 'none' }}
-                    >
-                      <HomePage />
-                    </div>
+                <div className="w-full pr-2 py-2 ml-16 xl:ml-52 flex justify-center">
+                  <div className="w-full max-w-[680px] rounded-lg shadow-lg bg-background overflow-hidden">
+                    {getCurrentPage()}
                   </div>
                 </div>
               </div>
@@ -412,61 +255,18 @@ export function SecondaryPageLink({
   className?: string
   onClick?: (e: React.MouseEvent) => void
 }) {
-  const { push } = useSecondaryPage()
-
   return (
-    <span
+    <a
+      href={to}
       className={cn('cursor-pointer', className)}
       onClick={(e) => {
         if (onClick) {
           onClick(e)
         }
-        push(to)
+        // Let the browser handle the navigation naturally
       }}
     >
       {children}
-    </span>
+    </a>
   )
-}
-
-function isCurrentPage(stack: TStackItem[], url: string) {
-  const currentPage = stack[stack.length - 1]
-  if (!currentPage) return false
-
-  return currentPage.url === url
-}
-
-function findAndCreateComponent(url: string, index: number) {
-  const path = url.split('?')[0].split('#')[0]
-  for (const { matcher, element } of routes) {
-    const match = matcher(path)
-    if (!match) continue
-
-    if (!element) return {}
-    const ref = createRef<TPageRef>()
-    return { component: cloneElement(element, { ...match.params, index, ref } as any), ref }
-  }
-  return {}
-}
-
-function pushNewPageToStack(
-  stack: TStackItem[],
-  url: string,
-  maxStackSize = 5,
-  specificIndex?: number
-) {
-  const currentItem = stack[stack.length - 1]
-  const currentIndex = specificIndex ?? (currentItem ? currentItem.index + 1 : 0)
-
-  const { component, ref } = findAndCreateComponent(url, currentIndex)
-  if (!component) return { newStack: stack, newItem: null }
-
-  const newItem = { component, ref, url, index: currentIndex }
-  const newStack = [...stack, newItem]
-  const lastCachedIndex = newStack.findIndex((stack) => stack.component)
-  // Clear the oldest cached component if there are too many cached components
-  if (newStack.length - lastCachedIndex > maxStackSize) {
-    newStack[lastCachedIndex].component = null
-  }
-  return { newStack, newItem }
 }
